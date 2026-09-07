@@ -1,0 +1,21 @@
+{
+  "name": "pomoyka",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram-only агрегатор абсурдных новостей",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "parse": "node --env-file=.env scripts/parse.js",
+    "filter": "node --env-file=.env scripts/filter.js",
+    "post": "node --env-file=.env scripts/post.js",
+    "digest": "node --env-file=.env scripts/digest.js"
+  },
+  "dependencies": {
+    "@extractus/article-extractor": "^9.0.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "rss-parser": "^3.13.0"
+  }
+}

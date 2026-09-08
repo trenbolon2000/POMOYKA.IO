@@ -18,7 +18,7 @@ import { sendPhoto, CAPTION_LIMIT } from '../lib/telegram.js';
 import { MAX_AGE_DAYS, MIN_GAP_MINUTES } from '../lib/config.js';
 
 const POST_LIMIT_DEFAULT = 1;
-const SCORE_THRESHOLD = 7;
+const SCORE_THRESHOLD = 6;
 const GAP_MS = 1500; // пауза между постами, чтобы не ловить 429
 
 const { TELEGRAM_CHANNEL_ID } = process.env;
@@ -32,12 +32,30 @@ const hostName = (url) => {
   }
 };
 
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Первое предложение выжимки (описывает суть) — минимум 15 символов до
+// первого . ! ? …; если пунктуации нет, берём весь текст.
+function firstSentence(text) {
+  const m = text.match(/^(.{15,}?[.!?…]+)(\s|$)/s);
+  return m ? m[1] : text;
+}
+
+// caption с HTML: первое предложение выжимки — жирным. Длину держим по видимым
+// символам (теги в лимит Telegram не идут).
 function buildCaption({ title, summary, sourceName, url }) {
+  const t = (title || '').trim();
   const tail = `\n\nИсточник: ${sourceName}\n${url}`;
-  const room = CAPTION_LIMIT - title.length - tail.length - 2;
-  let body = summary || '';
-  if (body.length > room) body = `${body.slice(0, Math.max(0, room - 1)).trimEnd()}…`;
-  return `${title}\n\n${body}${tail}`;
+  const budget = CAPTION_LIMIT - t.length - tail.length - 4;
+
+  let body = (summary || '').trim();
+  if (body.length > budget) body = `${body.slice(0, Math.max(0, budget - 1)).trimEnd()}…`;
+
+  const first = firstSentence(body);
+  const rest = body.slice(first.length).trimStart();
+  const bodyHtml = rest ? `<b>${esc(first)}</b> ${esc(rest)}` : `<b>${esc(first)}</b>`;
+
+  return `${esc(t)}\n\n${bodyHtml}\n\nИсточник: ${esc(sourceName)}\n${esc(url)}`;
 }
 
 async function publishRow(row) {
@@ -50,7 +68,7 @@ async function publishRow(row) {
     url: row.original_url,
   });
 
-  const result = await sendPhoto(TELEGRAM_CHANNEL_ID, png, caption);
+  const result = await sendPhoto(TELEGRAM_CHANNEL_ID, png, caption, 'HTML');
 
   const { error } = await db
     .from('news')

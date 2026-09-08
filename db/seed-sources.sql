@@ -19,6 +19,9 @@ insert into sources (name, rss_url, region, active) values
   ('UPI — Odd News',                 'https://rss.upi.com/news/odd_news.rss',                'US', true),
   ('Express — Weird',                'https://www.express.co.uk/posts/rss/80/weird',         'UK', true),
   ('Mirror — Weird News',            'https://www.mirror.co.uk/news/weird-news/rss.xml',     'UK', true),  -- слабее прочих, под наблюдением
+  -- Oddity Central: профильный weird-news сайт, глобальные истории с началом
+  -- и концом. Мало items (~10 в фиде, ~1 в 2 дня), но чистый жанр.
+  ('Oddity Central',                 'https://www.odditycentral.com/feed',                  'WORLD', true),
 
   -- === Отключено: общие ленты, 57-90% safety_flag на тесте Шага 3 ===
   ('The Sun — News',                 'https://www.thesun.co.uk/news/feed/',                  'UK', false),  -- + невалидный XML

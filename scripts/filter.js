@@ -81,6 +81,9 @@ function stage1Messages({ title, excerpt, src }) {
       '- is_absurd: true, если это подлинный курьёз, а не обычная новость;\n' +
       '- safety_flag: true, если это криминал, политика, реальная трагедия или ' +
       'насилие — даже если звучит дико.\n' +
+      'ВАЖНО: если событие описано как случившееся давно (несколько месяцев назад ' +
+      'и раньше) или это подборка/ретроспектива старых историй — is_absurd=false, ' +
+      'score низкий. Нам нужны только свежие новости.\n' +
       'Ничего не переписывай. Верни строгий JSON: ' +
       '{"is_absurd": boolean, "score": number, "safety_flag": boolean}',
     user: `ЗАГОЛОВОК: ${title}\nНАЧАЛО ТЕКСТА: ${excerpt || '(нет)'}\nИСТОЧНИК: ${src}`,
@@ -95,12 +98,31 @@ function stage2Messages({ title, excerpt, src }) {
       'примеров.\n\n' +
       EDITOR_PROMPT +
       '\n\nПо исходной новости сделай:\n' +
-      '- rewritten_title_ru: хлёсткий заголовок на русском;\n' +
-      '- summary_ru: выжимка 1-2 абзаца на русском.\n' +
+      '- rewritten_title_ru: хлёсткий заголовок на русском (без мата);\n' +
+      '- summary_ru: РОВНО один абзац, максимум 4 предложения. Только суть — ' +
+      'второстепенные детали, лишние даты и цифры отбрось, даже если они есть ' +
+      'в источнике.\n' +
+      'ЖЁСТКОЕ ПРАВИЛО: в summary_ru РОВНО ОДНО матерное слово — обязательно в ' +
+      'каждом тексте, даже если новость мрачновата. Не ноль, не два. Слово ' +
+      'точное и уместное, работает на контрасте с ровным тоном, не декоративное.\n' +
       'СТРОГО: не добавляй фактов, цифр, цитат и деталей, которых нет в исходном ' +
       'тексте. Верни строгий JSON: {"rewritten_title_ru": string, "summary_ru": string}',
     user: `ЗАГОЛОВОК: ${title}\nТЕКСТ: ${excerpt || '(нет)'}\nИСТОЧНИК: ${src}`,
   };
+}
+
+// Корни распространённого русского мата — для проверки правила «одно слово».
+// Без \b: в JS он не работает как граница слова перед кириллицей.
+const SWEAR_RE =
+  /(бля[дхт]|блях|хуй|хуё|хуя|хуев|хуи|пизд|ебан|ёбан|ебал|ёбну|заеб|въеб|уеб|отъеб|наеб|подъеб|пиздец|охуе|нихуя|дохуя|похуй|нахуй|говн|дерьм|мудак|мудло|долбоёб|залуп|манда|г[ао]ндон|сран|обосра|засран|сук[аиуойе])/gi;
+
+function violatesRules(summary) {
+  const s = summary || '';
+  const swears = s.match(SWEAR_RE) || [];
+  if (swears.length !== 1) return `матерных слов ${swears.length}, нужно ровно одно`;
+  const sentences = s.split(/[.!?]+(\s|$)/).filter((x) => x && x.trim().length > 3).length;
+  if (s.length > 550 || sentences > 5) return 'слишком длинно, нужен один абзац до 4 предложений';
+  return null;
 }
 
 async function processRow(row) {
@@ -124,7 +146,20 @@ async function processRow(row) {
   if (!safety && s1.is_absurd && score >= REWRITE_THRESHOLD) {
     const article = await fetchArticleText(row.original_url);
     fullText = Boolean(article);
-    const s2 = await chatJson(stage2Messages({ ...input, excerpt: article || input.excerpt }));
+    const msgs = stage2Messages({ ...input, excerpt: article || input.excerpt });
+
+    let s2 = await chatJson(msgs);
+    const problem = violatesRules(s2.summary_ru);
+    if (problem) {
+      // Одна попытка переписать с явным указанием, что не так.
+      s2 = await chatJson({
+        system: msgs.system,
+        user:
+          `${msgs.user}\n\nТвой предыдущий вариант summary_ru нарушил правило: ${problem}.\n` +
+          `Прежний текст: «${s2.summary_ru}»\n` +
+          'Перепиши: РОВНО одно матерное слово, один абзац, максимум 4 предложения. Тот же JSON.',
+      });
+    }
     patch.title_rewritten = String(s2.rewritten_title_ru || '').trim() || null;
     patch.content_summary = String(s2.summary_ru || '').trim() || null;
     rewritten = Boolean(patch.title_rewritten && patch.content_summary);

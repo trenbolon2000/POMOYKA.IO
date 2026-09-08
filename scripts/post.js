@@ -1,7 +1,8 @@
 // Шаг 4. Публикация готовых записей в Telegram-канал.
 //
 // Отбор (§7): absurdity_score >= 7, safety_flag = false, posted_to_telegram = false,
-// есть переписанный заголовок и выжимка.
+// есть переписанный заголовок и выжимка, новость не старше MAX_AGE_DAYS.
+// Темп: не чаще одной публикации в MIN_GAP_MINUTES (см. lib/config.js).
 // Пост: карточка (sendPhoto) + caption = заголовок / выжимка / источник + ссылка.
 // После успеха: posted_to_telegram = true, telegram_message_id, posted_at.
 //
@@ -14,8 +15,9 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { db } from '../lib/db.js';
 import { renderCard } from '../lib/card.js';
 import { sendPhoto, CAPTION_LIMIT } from '../lib/telegram.js';
+import { MAX_AGE_DAYS, MIN_GAP_MINUTES } from '../lib/config.js';
 
-const POST_LIMIT_DEFAULT = 2;
+const POST_LIMIT_DEFAULT = 1;
 const SCORE_THRESHOLD = 7;
 const GAP_MS = 1500; // пауза между постами, чтобы не ловить 429
 
@@ -62,9 +64,32 @@ async function publishRow(row) {
   return result.message_id;
 }
 
+async function lastPostedAt() {
+  const { data } = await db
+    .from('news')
+    .select('posted_at')
+    .eq('posted_to_telegram', true)
+    .not('posted_at', 'is', null)
+    .order('posted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.posted_at ? Date.parse(data.posted_at) : 0;
+}
+
 async function main() {
   const limit = Number(process.argv[2]) || POST_LIMIT_DEFAULT;
 
+  // Темп: не чаще одной публикации в MIN_GAP_MINUTES.
+  const sinceLast = (Date.now() - (await lastPostedAt())) / 60000;
+  if (sinceLast < MIN_GAP_MINUTES) {
+    console.log(
+      `Рано: последняя публикация ${Math.round(sinceLast)} мин назад ` +
+        `(минимум ${MIN_GAP_MINUTES}). Пропускаем.`,
+    );
+    return;
+  }
+
+  const freshSince = new Date(Date.now() - MAX_AGE_DAYS * 24 * 3600 * 1000).toISOString();
   const { data: rows, error } = await db
     .from('news')
     .select('id, original_url, title_rewritten, content_summary, source:sources(name)')
@@ -73,6 +98,7 @@ async function main() {
     .eq('posted_to_telegram', false)
     .not('title_rewritten', 'is', null)
     .not('content_summary', 'is', null)
+    .gte('source_published_at', freshSince)
     .order('absurdity_score', { ascending: false })
     .order('source_published_at', { ascending: false, nullsFirst: false })
     .limit(limit);

@@ -14,9 +14,11 @@
 import { pathToFileURL } from 'node:url';
 import Parser from 'rss-parser';
 import { db } from '../lib/db.js';
+import { MAX_AGE_DAYS } from '../lib/config.js';
 
 const RSS_TIMEOUT_MS = 20_000;
 const RECENT_TITLES_LIMIT = 200;
+const MAX_AGE_MS = MAX_AGE_DAYS * 24 * 3600 * 1000;
 const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 const TRACKING_PARAMS = /^(utm_|fbclid$|gclid$|mc_|ref$|ref_src$)/i;
@@ -115,6 +117,7 @@ async function processSource(source, seenTitles) {
   const rowUrls = new Set();
   let dupTitle = 0;
   let noLink = 0;
+  let stale = 0;
 
   for (const item of items) {
     const link = [item.link, item.guid].find((v) => /^https?:\/\//i.test(v || ''));
@@ -124,6 +127,13 @@ async function processSource(source, seenTitles) {
     }
     const url = canonicalUrl(link.trim());
     if (rowUrls.has(url)) continue;
+
+    // Только актуальные новости: без даты или старше MAX_AGE_DAYS — не берём.
+    const publishedAt = toIso(item);
+    if (!publishedAt || Date.now() - Date.parse(publishedAt) > MAX_AGE_MS) {
+      stale++;
+      continue;
+    }
 
     const norm = normalizeTitle(item.title);
     if (norm && seenTitles.has(norm)) {
@@ -138,7 +148,7 @@ async function processSource(source, seenTitles) {
       original_url: url,
       title_original: item.title?.trim() || null,
       content_original: excerpt(item),
-      source_published_at: toIso(item),
+      source_published_at: publishedAt,
     });
   }
 
@@ -152,7 +162,7 @@ async function processSource(source, seenTitles) {
     inserted = data?.length || 0;
   }
 
-  return { items: items.length, inserted, dupUrl: rows.length - inserted, dupTitle, noLink };
+  return { items: items.length, inserted, dupUrl: rows.length - inserted, dupTitle, noLink, stale };
 }
 
 async function main() {
@@ -175,7 +185,8 @@ async function main() {
       totalNew += r.inserted;
       console.log(
         `OK   ${source.name} — items ${r.items}, новых ${r.inserted}, ` +
-          `дубль-url ${r.dupUrl}, дубль-заголовок ${r.dupTitle}, без ссылки ${r.noLink}`,
+          `дубль-url ${r.dupUrl}, дубль-заголовок ${r.dupTitle}, ` +
+          `протухло/без даты ${r.stale}, без ссылки ${r.noLink}`,
       );
     } catch (e) {
       failed++;

@@ -18,7 +18,7 @@ import { sendPhoto, CAPTION_LIMIT } from '../lib/telegram.js';
 import { MAX_AGE_DAYS, MIN_GAP_MINUTES } from '../lib/config.js';
 
 const POST_LIMIT_DEFAULT = 1;
-const SCORE_THRESHOLD = 6;
+const SCORE_THRESHOLD = 5;
 const GAP_MS = 1500; // пауза между постами, чтобы не ловить 429
 
 const { TELEGRAM_CHANNEL_ID } = process.env;

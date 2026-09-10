@@ -22,7 +22,7 @@ import { chatJson, LlmAuthError, LlmError } from '../lib/llm.js';
 import { notifyOwner } from '../lib/telegram.js';
 
 const BATCH_DEFAULT = 40;
-const REWRITE_THRESHOLD = 6; // порог рерайта и публикации (владелец снизил с 7)
+const REWRITE_THRESHOLD = 5; // порог рерайта и публикации
 const FAIL_STREAK_ALERT = 3; // §8
 const ARTICLE_TIMEOUT_MS = 15_000;
 const ARTICLE_MAX_CHARS = 4000;

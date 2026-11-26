@@ -1,4 +1,6 @@
 // Шаг 2. RSS активных источников -> черновые записи в news. Без LLM.
+// Список лент — db/sources.json (сверяется с базой в начале запуска, см.
+// scripts/sources.js); в конце — сторож молчащих лент.
 //
 // Запуск локально:  node --env-file=.env scripts/parse.js
 // В GitHub Actions переменные окружения приходят из Secrets, --env-file не нужен.
@@ -15,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 import Parser from 'rss-parser';
 import { db } from '../lib/db.js';
 import { MAX_AGE_DAYS } from '../lib/config.js';
+import { syncSources, checkSilentFeeds } from './sources.js';
 
 const RSS_TIMEOUT_MS = 20_000;
 const RECENT_TITLES_LIMIT = 200;
@@ -191,6 +194,15 @@ async function processSource(source, seenTitles) {
 }
 
 async function main() {
+  // Список лент — из db/sources.json. Не сверился — работаем с тем, что в базе.
+  try {
+    const { changes, extra } = await syncSources(db);
+    if (changes.length) console.log(`Список лент обновлён по db/sources.json:\n- ${changes.join('\n- ')}\n`);
+    if (extra.length) console.log(`Включены в базе, но нет в db/sources.json: ${extra.join(', ')}\n`);
+  } catch (e) {
+    console.error(`Список лент не сверен с db/sources.json: ${e.message}\n`);
+  }
+
   const { data: sources, error } = await db
     .from('sources')
     .select('id, name, rss_url')
@@ -221,6 +233,14 @@ async function main() {
   }
 
   console.log(`\nИтого: новых записей ${totalNew}, источников с ошибкой ${failed}/${sources.length}`);
+
+  // Сторож: молчащая неделю лента — сообщение владельцу (журнал он не читает).
+  try {
+    const { alarms } = await checkSilentFeeds(db, sources);
+    for (const a of alarms) console.log(`МОЛЧИТ ${a.days} дн.: ${a.name} — сообщено владельцу`);
+  } catch (e) {
+    console.error(`Сторож молчащих лент не отработал: ${e.message}`);
+  }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

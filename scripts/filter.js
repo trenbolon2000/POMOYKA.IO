@@ -1,8 +1,10 @@
 // Шаг 3. Двухэтапная LLM-обработка необработанных записей news.
 //
 //   Этап 1 (дешёвый): заголовок + выжимка из RSS -> is_absurd, score 1-10, safety_flag.
-//   Этап 2 (рерайт):   только для прошедших порог. Догружаем полный текст статьи
-//                      (article-extractor) и переписываем по нему на русском.
+//   Этап 2 (рерайт):   только для прошедших порог. Сначала сверка дублей
+//                      (lib/dedup.js): та же история за неделю уже опубликована
+//                      или в очереди — рерайт не делаем. Иначе догружаем полный
+//                      текст статьи (article-extractor) и переписываем на русском.
 //
 // Запуск:  node --env-file=.env scripts/filter.js [сколько_записей]
 //          (без аргумента — BATCH_DEFAULT; для теста Шага 3: `... filter.js 200`)
@@ -19,10 +21,11 @@ import { extract } from '@extractus/article-extractor';
 import { db } from '../lib/db.js';
 import { isSatire } from '../lib/blacklist.js';
 import { chatJson, LlmAuthError, LlmError } from '../lib/llm.js';
+import { findSameStory, loadRecentStories, toStory } from '../lib/dedup.js';
 import { notifyOwner } from '../lib/telegram.js';
 
 const BATCH_DEFAULT = 40;
-const REWRITE_THRESHOLD = 5; // порог рерайта и публикации
+export const REWRITE_THRESHOLD = 5; // порог рерайта и публикации
 const FAIL_STREAK_ALERT = 3; // §8
 const ARTICLE_TIMEOUT_MS = 15_000;
 const ARTICLE_MAX_CHARS = 4000;
@@ -43,7 +46,7 @@ const clampScore = (v) => Math.min(10, Math.max(0, Number(v) || 0));
 
 // Полный текст статьи для этапа 2. Тянем только для прошедших порог (~единицы за
 // прогон). Ошибка/пейволл/таймаут -> null, рерайт делается по выжимке из RSS.
-async function fetchArticleText(url) {
+export async function fetchArticleText(url) {
   try {
     const timeout = new Promise((_, rej) =>
       setTimeout(() => rej(new Error('timeout')), ARTICLE_TIMEOUT_MS),
@@ -54,6 +57,8 @@ async function fetchArticleText(url) {
       .replace(/&[a-z#0-9]+;/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+    // Нечитаемые символы (страница не в UTF-8) — такой текст модели не даём.
+    if (text.includes('�')) return null;
     return text.length > 120 ? text.slice(0, ARTICLE_MAX_CHARS) : null;
   } catch {
     return null;
@@ -70,7 +75,7 @@ async function setState(key, value) {
 }
 
 // --- LLM-этапы ---
-function stage1Messages({ title, excerpt, src }) {
+export function stage1Messages({ title, excerpt, src }) {
   return {
     system:
       'Ты — редактор Telegram-канала подлинных абсурдных новостей. Ниже рабочие ' +
@@ -90,7 +95,7 @@ function stage1Messages({ title, excerpt, src }) {
   };
 }
 
-function stage2Messages({ title, excerpt, src }) {
+export function stage2Messages({ title, excerpt, src }) {
   return {
     system:
       'Ты — автор Telegram-канала абсурдных новостей. Ниже материалы редактора ' +
@@ -116,7 +121,7 @@ function stage2Messages({ title, excerpt, src }) {
 const SWEAR_RE =
   /(бля[дхт]|блях|хуй|хуё|хуя|хуев|хуи|пизд|ебан|ёбан|ебал|ёбну|заеб|въеб|уеб|отъеб|наеб|подъеб|пиздец|охуе|нихуя|дохуя|похуй|нахуй|говн|дерьм|мудак|мудло|долбоёб|залуп|манда|г[ао]ндон|сран|обосра|засран|сук[аиуойе])/gi;
 
-function violatesRules(summary) {
+export function violatesRules(summary) {
   const s = summary || '';
   const swears = s.match(SWEAR_RE) || [];
   if (swears.length !== 1) return `матерных слов ${swears.length}, нужно ровно одно`;
@@ -125,7 +130,8 @@ function violatesRules(summary) {
   return null;
 }
 
-async function processRow(row) {
+// recent — опубликованное и очередь за неделю (lib/dedup.js); null — дедуп выключен.
+async function processRow(row, recent) {
   const src = `${host(row.original_url)}${row.source?.name ? ` (${row.source.name})` : ''}`;
 
   // Сатирический домен — отсекаем в коде, без LLM. score 0 = не опубликуется.
@@ -143,8 +149,17 @@ async function processRow(row) {
 
   let rewritten = false;
   let fullText = false;
-  if (!safety && s1.is_absurd && score >= REWRITE_THRESHOLD) {
-    const article = await fetchArticleText(row.original_url);
+  let dupOf = null;
+  const passed = !safety && s1.is_absurd && score >= REWRITE_THRESHOLD;
+  // Полный текст тянем до сверки дублей: в нём имена, ники и места, по которым
+  // видно, тот же это случай или другой с похожим заголовком.
+  const article = passed ? await fetchArticleText(row.original_url) : null;
+  // Дубль: та же история уже опубликована или стоит в очереди — рерайт не делаем.
+  // Запись остаётся с оценкой, но без рерайта, поэтому в канал не попадёт.
+  const dup = passed && recent ? await findSameStory({ title: input.title, text: article || input.excerpt }, recent) : null;
+  if (dup) dupOf = dup.story.title;
+
+  if (passed && !dup) {
     fullText = Boolean(article);
     const msgs = stage2Messages({ ...input, excerpt: article || input.excerpt });
 
@@ -167,7 +182,9 @@ async function processRow(row) {
 
   const { error } = await db.from('news').update(patch).eq('id', row.id);
   if (error) throw new LlmError(`БД update: ${error.message}`);
-  return { kind: 'scored', score, safety, rewritten, fullText };
+  // Новая история встала в очередь — следующие записи этого прогона сверяются и с ней.
+  if (rewritten && recent) recent.push(toStory({ ...row, ...patch }));
+  return { kind: 'scored', score, safety, rewritten, fullText, dupOf };
 }
 
 async function main() {
@@ -181,22 +198,37 @@ async function main() {
     .limit(batch);
   if (error) throw error;
 
-  console.log(`К обработке: ${rows.length} (лимит ${batch})\n`);
+  console.log(`К обработке: ${rows.length} (лимит ${batch})`);
+
+  // Список для защиты от дублей. Не загрузился — прогон идёт без неё, а не падает.
+  let recent = null;
+  if (rows.length) {
+    try {
+      recent = await loadRecentStories(db);
+      console.log(`Для сверки дублей: ${recent.length} историй за неделю\n`);
+    } catch (e) {
+      console.error(`Сверка дублей выключена на этот прогон: ${e.message}\n`);
+    }
+  }
 
   let ok = 0;
   let errs = 0;
   let satire = 0;
   let flagged = 0;
   let rewrites = 0;
+  let dups = 0;
   let authError = null;
 
   for (const row of rows) {
     try {
-      const r = await processRow(row);
+      const r = await processRow(row, recent);
       ok++;
       if (r.kind === 'satire') {
         satire++;
         console.log(`SATIRE  ${row.title_original?.slice(0, 80)}`);
+      } else if (r.dupOf) {
+        dups++;
+        console.log(`DUP ${String(r.score).padStart(2)} ${row.title_original?.slice(0, 70)}  ≈  ${r.dupOf.slice(0, 70)}`);
       } else {
         if (r.safety) flagged++;
         if (r.rewritten) rewrites++;
@@ -215,7 +247,7 @@ async function main() {
   }
 
   console.log(
-    `\nОбработано ${ok} (рерайт ${rewrites}, safety_flag ${flagged}, сатира ${satire}), ` +
+    `\nОбработано ${ok} (рерайт ${rewrites}, дублей ${dups}, safety_flag ${flagged}, сатира ${satire}), ` +
       `ошибок ${errs}${authError ? ', LLM auth/оплата: ' + authError.message : ''}`,
   );
 

@@ -82,6 +82,27 @@ export const toIso = (item) => {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 };
 
+// Ленты не всегда в UTF-8: «Газета.Ru» отдаёт windows-1251. Прочитанная как UTF-8,
+// такая лента превращается в нечитаемые символы (�), а модель по ним сочиняет
+// новость. Сначала пробуем UTF-8; если вышли �, берём кодировку из заголовка
+// ответа или из <?xml ... encoding="..."?>.
+export function decodeFeed(bytes, contentType = '') {
+  const utf8 = new TextDecoder('utf-8').decode(bytes);
+  if (!utf8.includes('�')) return utf8;
+  const declared =
+    String(contentType || '').match(/charset=["']?([\w-]+)/i)?.[1] ||
+    utf8.slice(0, 300).match(/encoding=["']([\w-]+)["']/i)?.[1];
+  if (!declared || /^utf-?8$/i.test(declared)) return utf8;
+  try {
+    return new TextDecoder(declared).decode(bytes);
+  } catch {
+    return utf8; // неизвестная кодировка — такие записи отсеет проверка на �
+  }
+}
+
+// Запись с нечитаемыми символами в заголовке или выжимке в базу не берём.
+export const isGarbled = (...texts) => texts.some((t) => String(t || '').includes('�'));
+
 export async function fetchFeed(url) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), RSS_TIMEOUT_MS);
@@ -92,8 +113,7 @@ export async function fetchFeed(url) {
       headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/xml, text/xml, */*' },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const xml = await res.text();
-    return parser.parseString(xml);
+    return parser.parseString(decodeFeed(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type')));
   } finally {
     clearTimeout(timer);
   }
@@ -118,11 +138,16 @@ async function processSource(source, seenTitles) {
   let dupTitle = 0;
   let noLink = 0;
   let stale = 0;
+  let garbled = 0;
 
   for (const item of items) {
     const link = [item.link, item.guid].find((v) => /^https?:\/\//i.test(v || ''));
     if (!link) {
       noLink++;
+      continue;
+    }
+    if (isGarbled(item.title, excerpt(item))) {
+      garbled++;
       continue;
     }
     const url = canonicalUrl(link.trim());
@@ -162,7 +187,7 @@ async function processSource(source, seenTitles) {
     inserted = data?.length || 0;
   }
 
-  return { items: items.length, inserted, dupUrl: rows.length - inserted, dupTitle, noLink, stale };
+  return { items: items.length, inserted, dupUrl: rows.length - inserted, dupTitle, noLink, stale, garbled };
 }
 
 async function main() {
@@ -186,7 +211,8 @@ async function main() {
       console.log(
         `OK   ${source.name} — items ${r.items}, новых ${r.inserted}, ` +
           `дубль-url ${r.dupUrl}, дубль-заголовок ${r.dupTitle}, ` +
-          `протухло/без даты ${r.stale}, без ссылки ${r.noLink}`,
+          `протухло/без даты ${r.stale}, без ссылки ${r.noLink}` +
+          (r.garbled ? `, нечитаемых ${r.garbled}` : ''),
       );
     } catch (e) {
       failed++;

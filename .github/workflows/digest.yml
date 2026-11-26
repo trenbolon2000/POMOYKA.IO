@@ -2,7 +2,9 @@ name: digest
 
 on:
   schedule:
-    - cron: '0 18 * * *' # 18:00 UTC = 21:00 МСК (DIGEST_HOUR_UTC=18)
+    # 17:47 UTC = 20:47 МСК. Не в :00 — в начале часа GitHub перегружен, и
+    # «Итоги дня» на 18:00 UTC приходили в 4–7 утра по Москве.
+    - cron: '47 17 * * *'
   workflow_dispatch: {}
 
 concurrency:

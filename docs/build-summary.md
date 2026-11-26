@@ -29,7 +29,7 @@ RSS проверенных weird-разделов англоязычных СМ�
 
 Два независимых GitHub Actions по крону:
 
-**`pipeline`** (`*/30 * * * *`, каждые 30 мин):
+**`pipeline`** (`13,43 * * * *`, каждые 30 мин, не в :00 и :30):
 1. `scripts/parse.js` — RSS активных источников → черновые записи в `news`.
    Отбрасывает записи без даты и старше `MAX_AGE_DAYS`. Дедуп по `original_url`
    (unique) + по нормализованному заголовку против последних ~200 записей.
@@ -50,7 +50,7 @@ RSS проверенных weird-разделов англоязычных СМ�
    предложение выжимки жирным / остальное / источник + ссылка), проставляет
    `posted_to_telegram`, `telegram_message_id`, `posted_at`.
 
-**`digest`** (`0 18 * * *` = 21:00 МСК):
+**`digest`** (`47 17 * * *` = 20:47 МСК):
 - `scripts/digest.js` — топ-7 по `absurdity_score` среди записей с `posted_at` за
   последние 24 ч. Один пост-список: `title_rewritten` + ссылка на пост **внутри
   канала** (`https://t.me/pomoykaio/<message_id>`). Без вызова LLM. Карточка —
@@ -212,8 +212,8 @@ CLAUDE.md              рабочие правила проекта
 | Постов за запуск | `post.js` `POST_LIMIT_DEFAULT` | 1 |
 | Размер батча фильтра | `filter.js` `BATCH_DEFAULT` | 40 |
 | Порог алерта об ошибке LLM | `filter.js` `FAIL_STREAK_ALERT` | 3 подряд |
-| Крон пайплайна | `pipeline.yml` | `*/30 * * * *` |
-| Время дайджеста | `digest.yml` | `0 18 * * *` (21:00 МСК) |
+| Крон пайплайна | `pipeline.yml` | `13,43 * * * *` |
+| Время дайджеста | `digest.yml` | `47 17 * * *` (20:47 МСК) |
 
 Секреты (`.env` локально, GitHub Secrets в проде): `SUPABASE_URL`,
 `SUPABASE_SERVICE_KEY`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`,

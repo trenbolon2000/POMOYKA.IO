@@ -1,0 +1,80 @@
+name: run-stats
+
+# Счётчик запусков: сколько раз в сутки реально стартовали конвейер и «Итоги
+# дня» и во сколько. Пишет отчёт в отдельную ветку stats (не в main — чтобы не
+# мешать пушам). Нужен, чтобы видеть, помогает ли сдвиг расписания с :00/:30.
+
+on:
+  schedule:
+    - cron: '29 4 * * *' # раз в сутки, 04:29 UTC
+  push:
+    branches: [main]
+    paths: ['.github/workflows/run-stats.yml'] # первый отчёт — сразу после пуша
+  workflow_dispatch: {}
+
+concurrency:
+  group: run-stats
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    steps:
+      - name: count runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          since=$(date -u -d '21 days ago' +%F)
+          for wf in pipeline digest; do
+            gh api --paginate \
+              "repos/$REPO/actions/workflows/$wf.yml/runs?created=%3E%3D$since&per_page=100" \
+              --jq '.workflow_runs[] | [.created_at, .event, (.conclusion // .status)] | @tsv' \
+              > "$wf.tsv"
+          done
+          python3 - <<'PY'
+          import collections, datetime
+          out = ['# Запуски по дням (UTC)', '',
+                 f'Обновлено: {datetime.datetime.now(datetime.timezone.utc):%Y-%m-%d %H:%M} UTC.', '',
+                 'Конвейер по плану — 48 раз в сутки. «Итоги дня» — 1 раз.', '']
+          for wf, title in (('pipeline', 'Конвейер'), ('digest', 'Итоги дня')):
+              days = collections.defaultdict(list)
+              for line in open(f'{wf}.tsv', encoding='utf-8'):
+                  created, event, result = line.rstrip('\n').split('\t')
+                  t = datetime.datetime.strptime(created, '%Y-%m-%dT%H:%M:%SZ')
+                  days[t.date()].append((t, event, result))
+              out += [f'## {title}', '',
+                      '| День | по расписанию | вручную/пуш | неуспешных | время старта (UTC) |',
+                      '|---|---|---|---|---|']
+              for d in sorted(days, reverse=True):
+                  runs = sorted(days[d])
+                  sched = sum(1 for r in runs if r[1] == 'schedule')
+                  failed = sum(1 for r in runs if r[2] not in ('success', 'skipped', 'in_progress', 'queued'))
+                  times = ' '.join(f'{r[0]:%H:%M}' for r in runs if r[1] == 'schedule')
+                  out.append(f'| {d} | {sched} | {len(runs) - sched} | {failed} | {times} |')
+              out.append('')
+          open('run-stats.md', 'w', encoding='utf-8').write('\n'.join(out))
+          PY
+          cat run-stats.md
+
+      - name: save to branch stats
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir pub && cd pub
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git fetch -q --depth=1 origin stats; then git checkout -q -b stats FETCH_HEAD; else git checkout -q --orphan stats; fi
+          cp ../run-stats.md run-stats.md
+          git add run-stats.md
+          git commit -q -m "run-stats: $(date -u +'%F %H:%M') UTC" || exit 0
+          git push -q origin HEAD:stats

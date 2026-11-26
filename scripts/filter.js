@@ -57,6 +57,8 @@ export async function fetchArticleText(url) {
       .replace(/&[a-z#0-9]+;/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+    // Нечитаемые символы (страница не в UTF-8) — такой текст модели не даём.
+    if (text.includes('�')) return null;
     return text.length > 120 ? text.slice(0, ARTICLE_MAX_CHARS) : null;
   } catch {
     return null;
@@ -148,14 +150,16 @@ async function processRow(row, recent) {
   let rewritten = false;
   let fullText = false;
   let dupOf = null;
+  const passed = !safety && s1.is_absurd && score >= REWRITE_THRESHOLD;
+  // Полный текст тянем до сверки дублей: в нём имена, ники и места, по которым
+  // видно, тот же это случай или другой с похожим заголовком.
+  const article = passed ? await fetchArticleText(row.original_url) : null;
   // Дубль: та же история уже опубликована или стоит в очереди — рерайт не делаем.
   // Запись остаётся с оценкой, но без рерайта, поэтому в канал не попадёт.
-  const passed = !safety && s1.is_absurd && score >= REWRITE_THRESHOLD;
-  const dup = passed && recent ? await findSameStory({ title: input.title, text: input.excerpt }, recent) : null;
+  const dup = passed && recent ? await findSameStory({ title: input.title, text: article || input.excerpt }, recent) : null;
   if (dup) dupOf = dup.story.title;
 
   if (passed && !dup) {
-    const article = await fetchArticleText(row.original_url);
     fullText = Boolean(article);
     const msgs = stage2Messages({ ...input, excerpt: article || input.excerpt });
 
@@ -179,7 +183,7 @@ async function processRow(row, recent) {
   const { error } = await db.from('news').update(patch).eq('id', row.id);
   if (error) throw new LlmError(`БД update: ${error.message}`);
   // Новая история встала в очередь — следующие записи этого прогона сверяются и с ней.
-  if (rewritten && recent) recent.push(toStory(row));
+  if (rewritten && recent) recent.push(toStory({ ...row, ...patch }));
   return { kind: 'scored', score, safety, rewritten, fullText, dupOf };
 }
 

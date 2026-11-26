@@ -12,6 +12,8 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # для ежемесячной записи keepalive (см. последний шаг)
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -26,3 +28,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/digest.js
+
+      # GitHub выключает расписание в публичном репозитории после 60 дней без
+      # изменений (так «Помойка» встала в ноябре 2026). Раз в месяц, 1-го числа,
+      # пишем дату в .github/keepalive — этого хватает, чтобы конвейер не встал.
+      - name: keepalive
+        if: ${{ !cancelled() }}
+        run: |
+          if [ "$(date -u +%d)" != "01" ]; then exit 0; fi
+          date -u +%F > .github/keepalive
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive
+          git commit -m "keepalive: $(date -u +%F)" || exit 0
+          git push

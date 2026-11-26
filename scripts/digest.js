@@ -3,7 +3,7 @@
 //
 // Отбор: топ по absurdity_score среди записей с posted_at за последние 24 часа.
 // Формат: список «переписанный заголовок + ссылка на пост в самом канале».
-// Картинка: тот же рендер, фиксированный текст «Итоги дня».
+// Картинка: тот же рендер, фиксированный текст «Итоги дня» (в подписи его нет).
 //
 // Запуск: node --env-file=.env scripts/digest.js
 // Расписание: отдельный суточный workflow (.github/workflows/digest.yml).
@@ -31,17 +31,17 @@ const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 const dateRu = (d) =>
   d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', timeZone: 'Europe/Moscow' });
 
-function buildCaption(rows) {
-  const header = 'Итоги дня\n\n';
+// Подпись — сразу список: строка «Итоги дня» уже напечатана на карточке.
+export function buildCaption(rows) {
   const lines = rows.map((r, i) => {
     const link = `https://t.me/${TELEGRAM_CHANNEL_USERNAME}/${r.telegram_message_id}`;
     return `${i + 1}. ${clip(r.title_rewritten, TITLE_MAX)}\n${link}`;
   });
-  let caption = header + lines.join('\n\n');
+  let caption = lines.join('\n\n');
   // На всякий случай ужимаем до лимита, отбрасывая последние позиции.
   while (caption.length > CAPTION_LIMIT && lines.length > 1) {
     lines.pop();
-    caption = header + lines.join('\n\n');
+    caption = lines.join('\n\n');
   }
   return caption;
 }

@@ -3,7 +3,9 @@
 // Отбор (§7): absurdity_score >= 7, safety_flag = false, posted_to_telegram = false,
 // есть переписанный заголовок и выжимка, новость не старше MAX_AGE_DAYS.
 // Темп: не чаще одной публикации в MIN_GAP_MINUTES (см. lib/config.js).
-// Пост: карточка (sendPhoto) + caption = заголовок / выжимка / источник + ссылка.
+// Пост: карточка с заголовком (sendPhoto) + caption = выжимка / источник + ссылка.
+// Заголовок в подписи не повторяется: он уже на карточке. В базе он остаётся —
+// он нужен карточке, «Итогам дня» и «Джекпоту».
 // После успеха: posted_to_telegram = true, telegram_message_id, posted_at.
 //
 // Запуск: node --env-file=.env scripts/post.js [сколько_постов]
@@ -41,12 +43,12 @@ function firstSentence(text) {
   return m ? m[1] : text;
 }
 
-// caption с HTML: первое предложение выжимки — жирным. Длину держим по видимым
-// символам (теги в лимит Telegram не идут).
-function buildCaption({ title, summary, sourceName, url }) {
-  const t = (title || '').trim();
+// caption с HTML: заголовка нет — он уже напечатан на карточке. Подпись
+// начинается сразу с выжимки, её первое предложение — жирным. Длину держим по
+// видимым символам (теги в лимит Telegram не идут).
+export function buildCaption({ summary, sourceName, url }) {
   const tail = `\n\nИсточник: ${sourceName}\n${url}`;
-  const budget = CAPTION_LIMIT - t.length - tail.length - 4;
+  const budget = CAPTION_LIMIT - tail.length - 2; // 2 символа запаса
 
   let body = (summary || '').trim();
   if (body.length > budget) body = `${body.slice(0, Math.max(0, budget - 1)).trimEnd()}…`;
@@ -55,14 +57,13 @@ function buildCaption({ title, summary, sourceName, url }) {
   const rest = body.slice(first.length).trimStart();
   const bodyHtml = rest ? `<b>${esc(first)}</b> ${esc(rest)}` : `<b>${esc(first)}</b>`;
 
-  return `${esc(t)}\n\n${bodyHtml}\n\nИсточник: ${esc(sourceName)}\n${esc(url)}`;
+  return `${bodyHtml}\n\nИсточник: ${esc(sourceName)}\n${esc(url)}`;
 }
 
 async function publishRow(row) {
   const sourceName = row.source?.name || hostName(row.original_url);
   const png = renderCard({ title: row.title_rewritten, source: sourceName });
   const caption = buildCaption({
-    title: row.title_rewritten,
     summary: row.content_summary,
     sourceName,
     url: row.original_url,

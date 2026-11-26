@@ -92,6 +92,9 @@ export function stage1Messages({ title, excerpt, src }) {
       'Ничего не переписывай. Верни строгий JSON: ' +
       '{"is_absurd": boolean, "score": number, "safety_flag": boolean}',
     user: `ЗАГОЛОВОК: ${title}\nНАЧАЛО ТЕКСТА: ${excerpt || '(нет)'}\nИСТОЧНИК: ${src}`,
+    // Оценка должна быть одной и той же при повторе: температура 0 только здесь,
+    // рерайт (этап 2) пишет с обычной температурой.
+    temperature: 0,
   };
 }
 

@@ -4,3 +4,6 @@ node_modules/
 *.log
 .DS_Store
 /tmp/
+
+# отчёты рубрики «Абсурд власти» (уходят в ветку power)
+/out/

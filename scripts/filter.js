@@ -1,6 +1,7 @@
 // Шаг 3. Двухэтапная LLM-обработка необработанных записей news.
 //
 //   Этап 1 (дешёвый): заголовок + выжимка из RSS -> is_absurd, score 1-10, safety_flag.
+//                      Ленты рубрики «Абсурд власти» сюда не попадают (scripts/power.js).
 //   Этап 2 (рерайт):   только для прошедших порог. Сначала сверка дублей
 //                      (lib/dedup.js): та же история за неделю уже опубликована
 //                      или в очереди — рерайт не делаем. Иначе догружаем полный
@@ -23,6 +24,7 @@ import { isSatire } from '../lib/blacklist.js';
 import { chatJson, LlmAuthError, LlmError } from '../lib/llm.js';
 import { findSameStory, loadRecentStories, toStory } from '../lib/dedup.js';
 import { notifyOwner } from '../lib/telegram.js';
+import { powerSourceIds, idList } from '../lib/power.js';
 
 const BATCH_DEFAULT = 40;
 export const REWRITE_THRESHOLD = 5; // порог рерайта и публикации
@@ -30,7 +32,7 @@ const FAIL_STREAK_ALERT = 3; // §8
 const ARTICLE_TIMEOUT_MS = 15_000;
 const ARTICLE_MAX_CHARS = 4000;
 
-const EDITOR_PROMPT = readFileSync(new URL('../prompts/editor.md', import.meta.url), 'utf8').trim();
+export const EDITOR_PROMPT = readFileSync(new URL('../prompts/editor.md', import.meta.url), 'utf8').trim();
 if (EDITOR_PROMPT.length < 40) {
   throw new Error('prompts/editor.md пуст — это Шаг 0, его заполняет владелец');
 }
@@ -212,12 +214,17 @@ async function processRow(row, recent) {
 async function main() {
   const batch = Number(process.argv[2]) || BATCH_DEFAULT;
 
-  const { data: rows, error } = await db
+  // Записи лент рубрики «Абсурд власти» основной отбор не трогает: политика не
+  // попадает в общий поток, их раз в неделю разбирает scripts/power.js. Не
+  // узнали, какие это ленты, — прогон не идёт (лучше пропустить, чем пустить
+  // политику в канал).
+  const powerIds = await powerSourceIds(db);
+  let query = db
     .from('news')
     .select('id, original_url, title_original, content_original, source:sources(name)')
-    .is('absurdity_score', null)
-    .order('fetched_at', { ascending: true })
-    .limit(batch);
+    .is('absurdity_score', null);
+  if (powerIds.length) query = query.not('source_id', 'in', idList(powerIds));
+  const { data: rows, error } = await query.order('fetched_at', { ascending: true }).limit(batch);
   if (error) throw error;
 
   console.log(`К обработке: ${rows.length} (лимит ${batch})`);

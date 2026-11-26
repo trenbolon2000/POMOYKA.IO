@@ -77,4 +77,5 @@ jobs:
           cp ../run-stats.md run-stats.md
           git add run-stats.md
           git commit -q -m "run-stats: $(date -u +'%F %H:%M') UTC" || exit 0
-          git push -q origin HEAD:stats
+          for i in 1 2 3; do git push -q origin HEAD:stats && exit 0; git pull -q --rebase origin stats; done
+          exit 1

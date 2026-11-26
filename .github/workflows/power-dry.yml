@@ -1,0 +1,65 @@
+name: power-dry
+
+# Проба рубрики «Абсурд власти» без публикации. При каждом изменении кода
+# рубрики (и вручную) собирает выпуск из свежих материалов её лент — в базу
+# ничего не пишет, в Telegram ничего не шлёт (секретов Telegram здесь нет) — и
+# кладёт отчёт с карточкой в ветку power (issues/<неделя>-proba.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/power.js'
+      - 'lib/power.js'
+      - '.github/workflows/power-dry.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: power-dry
+  cancel-in-progress: true
+
+jobs:
+  dry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # отчёт — в ветку power
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: dry run
+        run: node scripts/power.js --dry
+
+      - name: save to branch power
+        if: ${{ !cancelled() && hashFiles('out/power/**') != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          src="$GITHUB_WORKSPACE/out/power"
+          mkdir "$RUNNER_TEMP/power" && cd "$RUNNER_TEMP/power"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git fetch -q --depth=1 origin power; then git checkout -q -b power FETCH_HEAD; else git checkout -q --orphan power; fi
+          mkdir -p issues && cp "$src"/* issues/
+          git add issues
+          names=$(ls "$src" | sed -n 's/\.md$//p' | tr '\n' ' ')
+          git commit -q -m "Абсурд власти, проба: ${names}" || exit 0
+          for i in 1 2 3; do git push -q origin HEAD:power && exit 0; git pull -q --rebase origin power; done
+          exit 1

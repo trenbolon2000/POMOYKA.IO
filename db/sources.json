@@ -14,6 +14,17 @@
   { "name": "Сплетник", "rss_url": "https://www.spletnik.ru/rss", "region": "RU", "active": true,
     "note": "добавлена 26.11.2026: звёзды СНГ «для колорита», ~26 записей в день; другие ленты хроники не берём — забили бы очередь фильтра" },
 
+  { "name": "ProPublica", "rss_url": "https://www.propublica.org/feeds/propublica/main", "region": "POWER", "active": true,
+    "note": "рубрика «Абсурд власти» (scripts/power.js): ~2,7 материала в день, полный текст открывается" },
+  { "name": "NPR — Politics", "rss_url": "https://feeds.npr.org/1014/rss.xml", "region": "POWER", "active": true,
+    "note": "рубрика «Абсурд власти»: ~4,5 в день, полный текст открывается" },
+  { "name": "BBC — US & Canada", "rss_url": "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml", "region": "POWER", "active": true,
+    "note": "рубрика «Абсурд власти»: ~4,2 в день, полный текст открывается" },
+  { "name": "Rolling Stone — Politics", "rss_url": "https://www.rollingstone.com/politics/feed/", "region": "POWER", "active": true,
+    "note": "рубрика «Абсурд власти»: ~1,6 в день, полный текст открывается" },
+  { "name": "The New Yorker — News", "rss_url": "https://www.newyorker.com/feed/news", "region": "POWER", "active": true,
+    "note": "рубрика «Абсурд власти»: ~2,4 в день, полный текст — частично" },
+
   { "name": "New York Post — Weird But True", "rss_url": "https://nypost.com/weird-but-true/feed/", "region": "US", "active": false,
     "note": "выключена 26.11.2026: молчит с 12 ноября" },
   { "name": "Oddity Central", "rss_url": "https://www.odditycentral.com/feed", "region": "WORLD", "active": false,

@@ -17,6 +17,11 @@ const TOP_N = 7;
 const WINDOW_HOURS = 24;
 const TITLE_MAX = 140; // обрезка одной строки списка
 
+// Кнопка под дайджестом — вход в игру «Джекпот» (мини-приложение @PomoykaJackpotbot).
+const JACKPOT_BUTTON = {
+  inline_keyboard: [[{ text: '🎰 Крутить Джекпот', url: 'https://t.me/PomoykaJackpotbot?startapp' }]],
+};
+
 const { TELEGRAM_CHANNEL_ID, TELEGRAM_CHANNEL_USERNAME } = process.env;
 if (!TELEGRAM_CHANNEL_ID || !TELEGRAM_CHANNEL_USERNAME) {
   throw new Error('Нужны TELEGRAM_CHANNEL_ID и TELEGRAM_CHANNEL_USERNAME в окружении');
@@ -61,7 +66,7 @@ async function main() {
 
   const caption = buildCaption(rows);
   const png = renderCard({ title: 'Итоги дня', source: dateRu(new Date()) });
-  const result = await sendPhoto(TELEGRAM_CHANNEL_ID, png, caption);
+  const result = await sendPhoto(TELEGRAM_CHANNEL_ID, png, caption, undefined, JACKPOT_BUTTON);
 
   console.log(`Дайджест отправлен: msg ${result.message_id}, позиций ${rows.length}`);
 }
